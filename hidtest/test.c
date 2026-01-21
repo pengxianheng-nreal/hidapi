@@ -187,6 +187,48 @@ int main(int argc, char* argv[])
 	buf[0] = 0x01;
 	buf[1] = 0x81;
 
+	{
+		struct hid_device_info* devs = hid_enumerate(0x3318, 0x043a);
+		struct hid_device_info* cur = devs;
+		while (cur) {
+			printf("HidDevice::open cur->path:%s,cur->interface_number:%d\n",cur->path,cur->interface_number);
+			cur = cur->next;
+		}
+		cur = devs;
+		while (cur) {
+			if (cur->interface_number == 1) {
+				handle = hid_open_path(cur->path);
+				printf("HidDevice::open cur->path:%s,interface_number_:%d success\n",cur->path,cur->interface_number);
+				break;
+			}
+			cur = cur->next;
+		}
+		hid_free_enumeration(devs);
+
+		if (!handle) {
+			printf("Failed to open HID device\n");
+			return 1;
+		}
+
+		#define MAX_IMU_BUF_SIZE 1024
+		//#define MAX_IMU_BUF_SIZE 264
+		unsigned char imu_buf[MAX_IMU_BUF_SIZE];
+
+		printf("hid_read begin\n");
+		res = hid_read(handle, imu_buf, MAX_IMU_BUF_SIZE);
+		if (res < 0) {
+	#if HID_API_VERSION >= HID_API_MAKE_VERSION(0, 15, 0)
+			printf("Unable to read from device: %ls\n", hid_read_error(handle));
+	#else
+			printf("Unable to read from device: %ls\n", hid_error(handle));
+	#endif
+		}
+		else {
+			printf("read %d bytes\n", res);
+		}
+	}
+
+
 
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
