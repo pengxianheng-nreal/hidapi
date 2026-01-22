@@ -39,7 +39,7 @@
 
 //
 // Sample using platform-specific headers
-#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0) && !defined(USING_HIDAPI_LIBUSB)
 #include <hidapi_darwin.h>
 #endif
 
@@ -130,6 +130,15 @@ void print_devices_with_descriptor(struct hid_device_info *cur_dev) {
 	}
 }
 
+void do_hid_exit()
+{
+	//hidapi 官方明确说过（总结版）：macOS：darwin backend 是一等公民；libusb backend = 功能兜底 / 非推荐；
+	//macos 上 hid_exit()：在 libusb backend 下并不总是安全
+#if !defined(__APPLE__) || !defined(USING_HIDAPI_LIBUSB)
+	hid_exit();
+#endif
+}
+
 int main(int argc, char* argv[])
 {
 	(void)argc;
@@ -172,7 +181,7 @@ int main(int argc, char* argv[])
 	if (hid_init())
 		return -1;
 
-#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0)
+#if defined(__APPLE__) && HID_API_VERSION >= HID_API_MAKE_VERSION(0, 12, 0) && !defined(USING_HIDAPI_LIBUSB)
 	// To work properly needs to be called before hid_open/hid_open_path after hid_init.
 	// Best/recommended option - call it right after hid_init.
 	hid_darwin_set_open_exclusive(0);
@@ -188,25 +197,28 @@ int main(int argc, char* argv[])
 	buf[1] = 0x81;
 
 	{
-		struct hid_device_info* devs = hid_enumerate(0x3318, 0x043a);
-		struct hid_device_info* cur = devs;
+		//读取hylla hid imu数据
+		struct hid_device_info* hid_devs = hid_enumerate(0x3318, 0x043a);
+		struct hid_device_info* cur = hid_devs;
 		while (cur) {
 			printf("HidDevice::open cur->path:%s,cur->interface_number:%d\n",cur->path,cur->interface_number);
 			cur = cur->next;
 		}
-		cur = devs;
+		cur = hid_devs;
 		while (cur) {
 			if (cur->interface_number == 1) {
+				printf("HidDevice::open begin,cur->path:%s,interface_number_:%d\n",cur->path,cur->interface_number);
 				handle = hid_open_path(cur->path);
-				printf("HidDevice::open cur->path:%s,interface_number_:%d success\n",cur->path,cur->interface_number);
+				printf("HidDevice::open end, cur->path:%s,interface_number_:%d success\n",cur->path,cur->interface_number);
 				break;
 			}
 			cur = cur->next;
 		}
-		hid_free_enumeration(devs);
+		hid_free_enumeration(hid_devs);
 
 		if (!handle) {
 			printf("Failed to open HID device\n");
+			do_hid_exit();
 			return 1;
 		}
 
@@ -226,9 +238,15 @@ int main(int argc, char* argv[])
 		else {
 			printf("read %d bytes\n", res);
 		}
+		hid_close(handle);
+
+		/* Free static HIDAPI objects. */
+		do_hid_exit();
+#ifdef _WIN32
+	system("pause");
+#endif
+		return 0;
 	}
-
-
 
 	// Open the device using the VID, PID,
 	// and optionally the Serial number.
@@ -236,7 +254,7 @@ int main(int argc, char* argv[])
 	handle = hid_open(0x4d8, 0x3f, NULL);
 	if (!handle) {
 		printf("unable to open device\n");
-		hid_exit();
+		do_hid_exit();
  		return 1;
 	}
 
@@ -380,7 +398,7 @@ int main(int argc, char* argv[])
 	hid_close(handle);
 
 	/* Free static HIDAPI objects. */
-	hid_exit();
+	do_hid_exit();
 
 #ifdef _WIN32
 	system("pause");

@@ -8,6 +8,8 @@ add_library(hidapi_libusb
 )
 target_link_libraries(hidapi_libusb PUBLIC hidapi_include)
 
+target_compile_definitions(hidapi_libusb PRIVATE HIDAPI_WITH_LIBUSB)
+
 if(TARGET usb-1.0)
     target_link_libraries(hidapi_libusb PRIVATE usb-1.0)
 else()
