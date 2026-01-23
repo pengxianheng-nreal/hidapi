@@ -163,7 +163,7 @@ else()
     endif()
 endif()
 
-if(HIDAPI_WITH_LIBUSB AND !WIN32)
+if(HIDAPI_WITH_LIBUSB AND NOT WIN32)
     target_include_directories(hidapi_include INTERFACE
         "$<BUILD_INTERFACE:${PROJECT_ROOT}/libusb>"
     )
