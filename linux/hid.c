@@ -42,7 +42,76 @@
 #include <linux/input.h>
 #include <libudev.h>
 
+
 #include "hidapi.h"
+
+#ifndef HAVE_WCSDUP
+static wchar_t *wcsdup(const wchar_t *s)
+{
+    size_t len = wcslen(s) + 1;
+    wchar_t *d = malloc(len * sizeof(wchar_t));
+    if (d)
+        wcscpy(d, s);
+    return d;
+}
+#endif
+
+#ifndef HAVE_STRDUP
+static char *strdup(const char *s)
+{
+    size_t len;
+    char *d;
+    if (!s)
+        return NULL;
+    len = strlen(s) + 1;
+    d = (char *)malloc(len);
+    if (!d)
+        return NULL;
+    memcpy(d, s, len);
+    return d;
+}
+#endif
+
+
+#ifndef HAVE_STRTOK_R
+char *strtok_r(char *str, const char *delim, char **saveptr)
+{
+    char *token_start;
+    char *token_end;
+    /* 参数校验 */
+    if (delim == NULL || saveptr == NULL)
+        return NULL;
+    /* 第一次调用使用 str，后续调用使用 saveptr */
+    if (str == NULL)
+        str = *saveptr;
+    if (str == NULL)
+        return NULL;
+    /* 跳过前导分隔符 */
+    str += strspn(str, delim);
+    if (*str == '\0') {
+        *saveptr = NULL;
+        return NULL;
+    }
+    token_start = str;
+    /* 找到 token 结尾 */
+    token_end = token_start + strcspn(token_start, delim);
+    if (*token_end == '\0') {
+        /* 已到字符串结尾 */
+        *saveptr = NULL;
+    } else {
+        /* 截断并保存下一个位置 */
+        *token_end = '\0';
+        *saveptr = token_end + 1;
+    }
+    return token_start;
+}
+
+#endif /* HAVE_STRTOK_R */
+
+
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 
 #ifdef HIDAPI_ALLOW_BUILD_WORKAROUND_KERNEL_2_6_39
 /* This definitions first appeared in Linux Kernel 2.6.39 in linux/hidraw.h.
@@ -1444,4 +1513,34 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 	if (last_global_error_str == NULL)
 		return L"Success";
 	return last_global_error_str;
+}
+
+int32_t HID_API_EXPORT_CALL hid_get_pid_vid(hid_device *device, uint16_t* pid, uint16_t* vid) {
+	(void)device;
+	(void)pid;
+	(void)vid;
+    return -1;
+}
+
+int HID_API_EXPORT hid_callback_register(hid_device *device, hid_user_callback_t* user_cb, void* user_ptr){
+	(void)device;
+	(void)user_cb;
+	(void)user_ptr;
+    return -1;
+}
+
+void HID_API_EXPORT hid_callback_deregister(hid_device *device){
+	(void)device;
+}
+
+HID_API_EXPORT hid_device * HID_API_CALL hid_libusb_wrap_sys_device(intptr_t sys_dev, int interface_num) {
+	(void)sys_dev;
+	(void)interface_num;
+    return NULL;
+}
+
+uint64_t HID_API_EXPORT_CALL hid_get_threadId(hid_device *device)
+{
+	(void)device;
+    return 0;
 }

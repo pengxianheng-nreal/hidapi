@@ -39,6 +39,10 @@
 #include <fcntl.h>
 #include <wchar.h>
 
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+
 /* GNU / LibUSB */
 #include <libusb.h>
 #if !defined(__ANDROID__) && !defined(NO_ICONV)
@@ -118,6 +122,11 @@ struct hid_device_ {
 
 	/* List of received input reports. */
 	struct input_report *input_reports;
+
+
+	uint64_t tid;
+	hid_user_callback_t* user_callback;
+	void* user_ptr;
 
 	/* Was kernel driver detached by libusb */
 #ifdef DETACH_KERNEL_DRIVER
@@ -957,45 +966,49 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 	int res;
 
 	if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
+		if (NULL == dev->user_callback) {
+			struct input_report *rpt = (struct input_report*) malloc(sizeof(*rpt));
+			rpt->data = (uint8_t*) malloc(transfer->actual_length);
+			memcpy(rpt->data, transfer->buffer, transfer->actual_length);
+			rpt->len = transfer->actual_length;
+			rpt->next = NULL;
 
-		struct input_report *rpt = (struct input_report*) malloc(sizeof(*rpt));
-		rpt->data = (uint8_t*) malloc(transfer->actual_length);
-		memcpy(rpt->data, transfer->buffer, transfer->actual_length);
-		rpt->len = transfer->actual_length;
-		rpt->next = NULL;
+			hidapi_thread_mutex_lock(&dev->thread_state);
 
-		hidapi_thread_mutex_lock(&dev->thread_state);
-
-		/* Attach the new report object to the end of the list. */
-		if (dev->input_reports == NULL) {
-			/* The list is empty. Put it at the root. */
-			dev->input_reports = rpt;
-			hidapi_thread_cond_signal(&dev->thread_state);
-		}
-		else {
-			/* Find the end of the list and attach. */
-			struct input_report *cur = dev->input_reports;
-			int num_queued = 0;
-			while (cur->next != NULL) {
-				cur = cur->next;
-				num_queued++;
+			/* Attach the new report object to the end of the list. */
+			if (dev->input_reports == NULL) {
+				/* The list is empty. Put it at the root. */
+				dev->input_reports = rpt;
+				hidapi_thread_cond_signal(&dev->thread_state);
 			}
-			cur->next = rpt;
+			else {
+				/* Find the end of the list and attach. */
+				struct input_report *cur = dev->input_reports;
+				int num_queued = 0;
+				while (cur->next != NULL) {
+					cur = cur->next;
+					num_queued++;
+				}
+				cur->next = rpt;
 
-			/* Pop one off if we've reached 30 in the queue. This
-			   way we don't grow forever if the user never reads
-			   anything from the device. */
-			if (num_queued > 30) {
-				return_data(dev, NULL, 0);
+				/* Pop one off if we've reached 30 in the queue. This
+				way we don't grow forever if the user never reads
+				anything from the device. */
+				if (num_queued > 30) {
+					return_data(dev, NULL, 0);
+				}
 			}
+			hidapi_thread_mutex_unlock(&dev->thread_state);
 		}
-		hidapi_thread_mutex_unlock(&dev->thread_state);
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_CANCELLED) {
 		dev->shutdown_thread = 1;
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
 		dev->shutdown_thread = 1;
+		LOG("No device found\n");
+		if (dev->user_callback)
+			dev->user_callback(NULL, -1, dev->user_ptr);
 	}
 	else if (transfer->status == LIBUSB_TRANSFER_TIMED_OUT) {
 		//LOG("Timeout (normal)\n");
@@ -1009,15 +1022,41 @@ static void LIBUSB_CALL read_callback(struct libusb_transfer *transfer)
 		return;
 	}
 
+	uint8_t transfer_buffer[transfer->actual_length+1];
+	int transfer_length = transfer->actual_length;
+	if (dev->user_callback) {
+		memcpy(transfer_buffer, transfer->buffer, transfer->actual_length);
+	}
+
 	/* Re-submit the transfer object. */
 	res = libusb_submit_transfer(transfer);
 	if (res != 0) {
 		LOG("Unable to submit URB: (%d) %s\n", res, libusb_error_name(res));
 		dev->shutdown_thread = 1;
 		dev->transfer_loop_finished = 1;
+		if (dev->user_callback)
+			dev->user_callback(NULL, -transfer->status, dev->user_ptr);
+	}else if (dev->user_callback && transfer->status == LIBUSB_TRANSFER_COMPLETED){
+		dev->user_callback(transfer_buffer, transfer_length, dev->user_ptr);
 	}
 }
 
+uint64_t HID_API_EXPORT_CALL hid_get_threadId(hid_device *device)
+{
+	return device->tid;
+}
+
+
+int32_t HID_API_EXPORT_CALL hid_get_pid_vid(hid_device *device, uint16_t* pid, uint16_t* vid) {
+	struct libusb_device_descriptor desc;	
+	struct libusb_device *dev = libusb_get_device(device->device_handle);
+	if (dev && 0 == libusb_get_device_descriptor(dev , &desc)) {
+		*vid = desc.idVendor;
+		*pid = desc.idProduct;
+		return 0;
+	}
+	return -1;
+}
 
 static void *read_thread(void *param)
 {
@@ -1025,6 +1064,19 @@ static void *read_thread(void *param)
 	hid_device *dev = param;
 	uint8_t *buf;
 	const size_t length = dev->input_ep_max_packet_size;
+
+#if defined(__ANDROID__)
+	nice(-20);
+	dev->tid = gettid();
+#elif defined(__APPLE__) && defined(__MACH__)
+	uint64_t tid = 0;
+	pthread_threadid_np(NULL, &tid);
+	dev->tid = tid;
+#elif(_WIN32) || defined(_WIN64)
+	dev->tid = 0; //TODO
+#else
+	dev->tid = syscall(__NR_gettid);
+#endif
 
 	/* Set up the transfer object. */
 	buf = (uint8_t*) malloc(length);
@@ -2011,6 +2063,23 @@ uint16_t get_usb_code_for_current_locale(void)
 
 	/* Found nothing. */
 	return 0x0;
+}
+
+int HID_API_EXPORT hid_callback_register(hid_device *device, hid_user_callback_t* user_cb, void* user_ptr){
+	if(!device || !user_cb){
+		return -1;
+	}
+	device->user_callback = user_cb;
+	device->user_ptr = user_ptr;
+	return 0;
+}
+
+void HID_API_EXPORT hid_callback_deregister(hid_device *device){
+	if(!device){
+		return;
+	}
+	device->user_callback = NULL;
+	device->user_ptr = NULL;
 }
 
 #ifdef __cplusplus

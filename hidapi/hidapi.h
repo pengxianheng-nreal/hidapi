@@ -28,6 +28,7 @@
 #define HIDAPI_H__
 
 #include <wchar.h>
+#include <stdint.h>  
 
 /* #480: this is to be refactored properly for v1.0 */
 #ifdef _WIN32
@@ -114,6 +115,8 @@ extern "C" {
 
 		struct hid_device_;
 		typedef struct hid_device_ hid_device; /**< opaque hidapi structure */
+
+		typedef void(hid_user_callback_t)(void* data, int data_len, void* user_ptr);
 
 		/** @brief HID underlying bus types.
 
@@ -683,6 +686,33 @@ extern "C" {
 				Pointer to statically allocated string, that contains version string.
 		*/
 		HID_API_EXPORT const char* HID_API_CALL hid_version_str(void);
+
+		/** @brief Get Thread ID
+
+			@ingroup API
+			@param device A device handle returned from hid_open().
+
+			@returns
+				This function returns threadID on success and -1 on error.
+		*/
+		uint64_t HID_API_EXPORT_CALL hid_get_threadId(hid_device *device);
+
+		/** @brief Get product id and vendor id via fd handle
+
+			@ingroup API
+			@param device A device handle returned from hid_open().
+
+			@returns
+				This function returns 0 on success and -1 on error.
+		*/
+		int32_t HID_API_EXPORT_CALL hid_get_pid_vid(hid_device *device, uint16_t* pid, uint16_t* vid);
+
+#if !defined(_WIN32) && !defined(__CYGWIN__) && !defined(_WIN64)
+		int HID_API_EXPORT_CALL hid_callback_register(hid_device *device,                                                       
+                                                      hid_user_callback_t* user_cb, void* user_ptr);
+
+		void HID_API_EXPORT_CALL hid_callback_deregister(hid_device *device);
+#endif
 
 #ifdef __cplusplus
 }

@@ -1593,3 +1593,10 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 		return L"Success";
 	return last_global_error_str;
 }
+
+int32_t HID_API_EXPORT_CALL hid_get_pid_vid(hid_device *device, uint16_t* pid, uint16_t* vid) {
+    *vid = get_vendor_id(device->device_handle);
+    *pid = get_product_id(device->device_handle);
+    return 0;
+}
+

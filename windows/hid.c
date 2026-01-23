@@ -1597,6 +1597,18 @@ HID_API_EXPORT const wchar_t * HID_API_CALL  hid_error(hid_device *dev)
 	return last_global_error_str;
 }
 
+int32_t HID_API_EXPORT_CALL hid_get_pid_vid(hid_device *device, uint16_t* pid, uint16_t* vid) {
+    HIDD_ATTRIBUTES attrib;
+	attrib.Size = sizeof(HIDD_ATTRIBUTES);
+    BOOLEAN res = HidD_GetAttributes(device->device_handle, &attrib);
+    if (res) {
+        *vid = attrib.VendorID;
+        *pid = attrib.ProductID;
+        return 0;
+    }
+    return -1;
+}
+
 #ifndef hidapi_winapi_EXPORTS
 #include "hidapi_descriptor_reconstruct.c"
 #endif
